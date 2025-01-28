@@ -1,0 +1,6 @@
+@MultitenantApiSingleDbSharedSchema_HostAddress = http://localhost:5185
+
+GET {{MultitenantApiSingleDbSharedSchema_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
