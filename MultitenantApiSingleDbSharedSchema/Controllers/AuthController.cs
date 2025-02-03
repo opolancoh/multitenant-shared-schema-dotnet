@@ -1,3 +1,5 @@
+using System.IdentityModel.Tokens.Jwt;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using MultitenantApiSingleDbSharedSchema.Core.Features.Auth.DTOs;
 using MultitenantApiSingleDbSharedSchema.Core.Features.Auth.Interfaces;
@@ -28,11 +30,11 @@ public class AuthController : ControllerBase
 
         return Ok(new { accessToken, refreshToken });
     }
-/*
+
     [HttpPost("refresh")]
     public async Task<IActionResult> Refresh([FromBody] RefreshRequest request)
     {
-        var (accessToken, newRefreshToken) = await _tokenService.RefreshTokenAsync(request.RefreshToken);
+        var (accessToken, newRefreshToken) = await _authService.RefreshTokenAsync(request.RefreshToken);
         if (accessToken == null || newRefreshToken == null)
         {
             return Unauthorized(new { message = "Invalid or expired refresh token" });
@@ -53,7 +55,6 @@ public class AuthController : ControllerBase
     [HttpPost("logout-all")]
     public async Task<IActionResult> LogoutAll()
     {
-        // Example: get the user ID from the JWT
         var userIdClaim = User.Claims.FirstOrDefault(c => c.Type == JwtRegisteredClaimNames.Sub);
         if (userIdClaim == null) return Unauthorized();
 
@@ -62,5 +63,5 @@ public class AuthController : ControllerBase
 
         await _authService.LogoutAllAsync(userId);
         return NoContent();
-    }*/
+    }
 }

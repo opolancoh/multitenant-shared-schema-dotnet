@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 using MultitenantApiSingleDbSharedSchema.Core.Features.Auth.Entities;
 using MultitenantApiSingleDbSharedSchema.Core.Features.Auth.Interfaces;
 using MultitenantApiSingleDbSharedSchema.Core.Features.Users.Entities;
@@ -13,7 +14,7 @@ public class AuthService : IAuthService
     private readonly SignInManager<ApplicationUser> _signInManager;
     private readonly ApplicationDbContext _dbContext;
     private readonly ITokenService _tokenService;
-    
+
 
     public AuthService(
         IConfiguration configuration,
@@ -21,7 +22,7 @@ public class AuthService : IAuthService
         SignInManager<ApplicationUser> signInManager,
         ApplicationDbContext dbContext,
         ITokenService tokenService
-        )
+    )
     {
         _configuration = configuration;
         _userManager = userManager;
@@ -29,7 +30,7 @@ public class AuthService : IAuthService
         _dbContext = dbContext;
         _tokenService = tokenService;
     }
-    
+
     public async Task<(string? accessToken, string? refreshToken)> LoginAsync(
         string username,
         string password)
@@ -48,7 +49,8 @@ public class AuthService : IAuthService
         var newRefreshToken = _tokenService.GenerateRefreshToken();
 
         // Save the refresh token in the DB
-        var refreshTokenExpireMinutes = _configuration.GetValue("Jwt:RefreshTokenExpireMinutes", 10080);  // default refresh token valid for 7 days
+        var refreshTokenExpireMinutes =
+            _configuration.GetValue("Jwt:RefreshTokenExpireMinutes", 10080); // default refresh token valid for 7 days
         var expiresAt = DateTime.UtcNow.AddMinutes(refreshTokenExpireMinutes);
         var refreshTokenEntity = new RefreshToken
         {
@@ -64,8 +66,8 @@ public class AuthService : IAuthService
 
         return (newAccessToken, newRefreshToken);
     }
-    
-    /* public async Task<(string? accessToken, string? refreshToken)> RefreshTokenAsync(string refreshToken)
+
+    public async Task<(string? accessToken, string? refreshToken)> RefreshTokenAsync(string refreshToken)
     {
         var existingToken = await _dbContext.RefreshTokens
             .Include(t => t.User)
@@ -87,8 +89,8 @@ public class AuthService : IAuthService
         await _dbContext.SaveChangesAsync();
 
         var user = existingToken.User;
-        var newAccessToken = await GenerateAccessTokenAsync(user);
-        var newRefreshToken = GenerateRefreshToken();
+        var newAccessToken = await _tokenService.GenerateAccessTokenAsync(user);
+        var newRefreshToken = _tokenService.GenerateRefreshToken();
 
         var newRefreshTokenEntity = new RefreshToken
         {
@@ -103,7 +105,7 @@ public class AuthService : IAuthService
 
         return (newAccessToken, newRefreshToken);
     }
-    
+
     public async Task LogoutAsync(string refreshToken)
     {
         var token = await _dbContext.RefreshTokens
@@ -115,7 +117,7 @@ public class AuthService : IAuthService
             await _dbContext.SaveChangesAsync();
         }
     }
-    
+
     public async Task LogoutAllAsync(Guid userId)
     {
         var tokens = await _dbContext.RefreshTokens
@@ -128,5 +130,5 @@ public class AuthService : IAuthService
         }
 
         await _dbContext.SaveChangesAsync();
-    } */
+    }
 }
