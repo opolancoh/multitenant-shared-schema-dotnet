@@ -22,7 +22,7 @@ public class UserRepository : IUserRepository
             .Select(x => new ApplicationUserResponse
             {
                 Id = x.Id,
-                UserName = x.UserName,
+                UserName = x.UserName!,
                 DisplayName = x.DisplayName,
                 Email = x.Email,
                 TenantId = x.TenantId,
@@ -31,7 +31,7 @@ public class UserRepository : IUserRepository
                     .Join(_context.Roles,
                         userRole => userRole.RoleId,
                         role => role.Id,
-                        (userRole, role) => role.Name)
+                        (userRole, role) => role.Name!)
                     .ToList()
             })
             .FirstOrDefaultAsync();
