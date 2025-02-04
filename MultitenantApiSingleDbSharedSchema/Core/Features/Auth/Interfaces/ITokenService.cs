@@ -7,4 +7,8 @@ public interface ITokenService
     Task<string> GenerateAccessTokenAsync(ApplicationUser user);
     
     string GenerateRefreshToken();
+
+    int GetAccessTokenExpiryMinutes();
+    
+    int GetRefreshTokenExpiryMinutes();
 }

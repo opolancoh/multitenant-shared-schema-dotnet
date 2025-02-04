@@ -1,134 +1,140 @@
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using MultitenantApiSingleDbSharedSchema.Core.Common;
+using MultitenantApiSingleDbSharedSchema.Core.Features.Auth.DTOs;
 using MultitenantApiSingleDbSharedSchema.Core.Features.Auth.Entities;
 using MultitenantApiSingleDbSharedSchema.Core.Features.Auth.Interfaces;
 using MultitenantApiSingleDbSharedSchema.Core.Features.Users.Entities;
+using MultitenantApiSingleDbSharedSchema.Core.Features.Users.Interfaces;
 using MultitenantApiSingleDbSharedSchema.Infrastructure.Persistence;
 
 namespace MultitenantApiSingleDbSharedSchema.Core.Features.Auth.Services;
 
 public class AuthService : IAuthService
 {
-    private readonly IConfiguration _configuration;
     private readonly UserManager<ApplicationUser> _userManager;
     private readonly SignInManager<ApplicationUser> _signInManager;
     private readonly ApplicationDbContext _dbContext;
     private readonly ITokenService _tokenService;
-
+    private readonly ICurrentUserService _currentUserService;
 
     public AuthService(
-        IConfiguration configuration,
         UserManager<ApplicationUser> userManager,
         SignInManager<ApplicationUser> signInManager,
         ApplicationDbContext dbContext,
-        ITokenService tokenService
+        ITokenService tokenService,
+        ICurrentUserService currentUserService
     )
     {
-        _configuration = configuration;
         _userManager = userManager;
         _signInManager = signInManager;
         _dbContext = dbContext;
         _tokenService = tokenService;
+        _currentUserService = currentUserService;
     }
 
-    public async Task<(string? accessToken, string? refreshToken)> LoginAsync(
-        string username,
-        string password)
+    public async Task<LoginResponse> LoginAsync(string username, string password)
     {
         var user = await _userManager.FindByNameAsync(username);
         if (user == null)
-            return (null, null);
+            return new LoginResponse(null, null);
 
-        var signInResult = await _signInManager.CheckPasswordSignInAsync(
-            user, password, lockoutOnFailure: false);
+        var signInResult = await _signInManager.CheckPasswordSignInAsync(user, password, lockoutOnFailure: false);
         if (!signInResult.Succeeded)
-            return (null, null);
+            return new LoginResponse(null, null);
 
-        // Generate tokens
-        var newAccessToken = await _tokenService.GenerateAccessTokenAsync(user);
-        var newRefreshToken = _tokenService.GenerateRefreshToken();
+        var accessToken = await _tokenService.GenerateAccessTokenAsync(user);
+        var refreshToken = _tokenService.GenerateRefreshToken();
 
-        // Save the refresh token in the DB
-        var refreshTokenExpireMinutes =
-            _configuration.GetValue("Jwt:RefreshTokenExpireMinutes", 10080); // default refresh token valid for 7 days
-        var expiresAt = DateTime.UtcNow.AddMinutes(refreshTokenExpireMinutes);
-        var refreshTokenEntity = new RefreshToken
-        {
-            Token = newRefreshToken,
-            UserId = user.Id,
-            CreatedAt = DateTime.UtcNow,
-            ExpiresAt = expiresAt,
-            IsRevoked = false
-        };
+        await SaveRefreshTokenAsync(user.Id, refreshToken);
 
-        _dbContext.RefreshTokens.Add(refreshTokenEntity);
-        await _dbContext.SaveChangesAsync();
-
-        return (newAccessToken, newRefreshToken);
+        return new LoginResponse(accessToken, refreshToken);
     }
 
-    public async Task<(string? accessToken, string? refreshToken)> RefreshTokenAsync(string refreshToken)
+    public async Task<RefreshTokenResponse> RefreshTokenAsync(string refreshToken)
     {
         var existingToken = await _dbContext.RefreshTokens
             .Include(t => t.User)
             .FirstOrDefaultAsync(t => t.Token == refreshToken);
 
-        if (existingToken == null)
-            return (null, null);
-
-        // Check if expired, revoked, or user missing
-        if (existingToken.IsRevoked
-            || existingToken.ExpiresAt <= DateTime.UtcNow
-            || existingToken.User == null)
-        {
-            return (null, null);
-        }
-
-        // Revoke the old token
-        existingToken.IsRevoked = true;
-        await _dbContext.SaveChangesAsync();
+        if (existingToken == null || existingToken.IsRevoked || existingToken.ExpiresAt <= DateTime.UtcNow ||
+            existingToken.User == null)
+            return new RefreshTokenResponse(null, null);
 
         var user = existingToken.User;
-        var newAccessToken = await _tokenService.GenerateAccessTokenAsync(user);
-        var newRefreshToken = _tokenService.GenerateRefreshToken();
 
-        var newRefreshTokenEntity = new RefreshToken
+        await using var transaction = await _dbContext.Database.BeginTransactionAsync();
+        try
         {
-            Token = newRefreshToken,
-            UserId = user.Id,
-            CreatedAt = DateTime.UtcNow,
-            ExpiresAt = DateTime.UtcNow.AddDays(7),
-            IsRevoked = false
-        };
-        _dbContext.RefreshTokens.Add(newRefreshTokenEntity);
-        await _dbContext.SaveChangesAsync();
+            // Revoke old token
+            existingToken.IsRevoked = true;
+            await _dbContext.SaveChangesAsync();
 
-        return (newAccessToken, newRefreshToken);
+            var newAccessToken = await _tokenService.GenerateAccessTokenAsync(user);
+            var newRefreshToken = _tokenService.GenerateRefreshToken();
+
+            await SaveRefreshTokenAsync(user.Id, newRefreshToken);
+
+            await transaction.CommitAsync();
+            return new RefreshTokenResponse(newAccessToken, refreshToken);
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            return new RefreshTokenResponse(null, null);
+        }
     }
 
-    public async Task LogoutAsync(string refreshToken)
+    public async Task<OperationResult> LogoutAsync(string refreshToken)
     {
+        // Sign out from Identity
+        await _signInManager.SignOutAsync();
+
+        // Invalidate the current refresh token
         var token = await _dbContext.RefreshTokens
             .FirstOrDefaultAsync(t => t.Token == refreshToken);
 
-        if (token != null && !token.IsRevoked)
-        {
-            token.IsRevoked = true;
-            await _dbContext.SaveChangesAsync();
-        }
+        if (token == null)
+            return OperationResult.Failure([
+                new OperationResultError() { Code = "RefreshToken", Description = "Invalid or expired refresh token." }
+            ]);
+
+        token.IsRevoked = true;
+        await _dbContext.SaveChangesAsync();
+
+        return OperationResult.Success();
     }
 
-    public async Task LogoutAllAsync(Guid userId)
+    public async Task<OperationResult> LogoutAllAsync()
     {
-        var tokens = await _dbContext.RefreshTokens
-            .Where(t => t.UserId == userId && !t.IsRevoked)
-            .ToListAsync();
+        var currentUserId = _currentUserService.UserId;
 
-        foreach (var t in tokens)
+        await _signInManager.SignOutAsync();
+
+        var revokeRefreshTokensResult = await _dbContext.RefreshTokens
+            .Where(t => t.UserId == currentUserId && !t.IsRevoked)
+            .ExecuteUpdateAsync(t => t.SetProperty(p => p.IsRevoked, true));
+
+        if (revokeRefreshTokensResult == 0)
+            return OperationResult.Failure([
+                new OperationResultError { Code = "_", Description = "Unable to revoke refresh tokens." }
+            ]);
+
+        return OperationResult.Success();
+    }
+
+    private async Task SaveRefreshTokenAsync(Guid userId, string refreshToken)
+    {
+        var refreshTokenEntity = new RefreshToken
         {
-            t.IsRevoked = true;
-        }
+            Token = refreshToken,
+            UserId = userId,
+            CreatedAt = DateTime.UtcNow,
+            ExpiresAt = DateTime.UtcNow.AddMinutes(_tokenService.GetRefreshTokenExpiryMinutes()),
+            IsRevoked = false
+        };
 
+        _dbContext.RefreshTokens.Add(refreshTokenEntity);
         await _dbContext.SaveChangesAsync();
     }
 }

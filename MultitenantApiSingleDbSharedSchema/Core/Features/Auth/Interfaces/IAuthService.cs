@@ -1,12 +1,15 @@
+using MultitenantApiSingleDbSharedSchema.Core.Common;
+using MultitenantApiSingleDbSharedSchema.Core.Features.Auth.DTOs;
+
 namespace MultitenantApiSingleDbSharedSchema.Core.Features.Auth.Interfaces;
 
 public interface IAuthService
 {
-    Task<(string? accessToken, string? refreshToken)> LoginAsync(string username, string password);
+    Task<LoginResponse>  LoginAsync(string username, string password);
     
-    Task<(string? accessToken, string? refreshToken)> RefreshTokenAsync(string refreshToken);
+    Task<RefreshTokenResponse>  RefreshTokenAsync(string refreshToken);
     
-    Task LogoutAsync(string refreshToken);
+    Task<OperationResult> LogoutAsync(string refreshToken);
     
-    Task LogoutAllAsync(Guid userId);
+    Task<OperationResult> LogoutAllAsync();
 }

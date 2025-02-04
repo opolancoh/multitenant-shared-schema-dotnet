@@ -1,6 +1,4 @@
-using Microsoft.AspNetCore.Identity;
 using MultitenantApiSingleDbSharedSchema.Extensions;
-using MultitenantApiSingleDbSharedSchema.Infrastructure.Persistence;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -36,3 +34,6 @@ app.MapControllers();
 // await app.SeedDefaultDataAsync();
 
 app.Run();
+
+// Make Program public so that tests can see it
+public partial class Program { }

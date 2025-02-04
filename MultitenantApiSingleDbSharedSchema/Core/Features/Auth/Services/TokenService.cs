@@ -29,7 +29,7 @@ public class TokenService : ITokenService
             new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
 
             // Custom
-            new("tenant_id", user.TenantId ?? string.Empty)
+            new("tenant_id", user.TenantId)
         };
 
         // Optionally add roles
@@ -42,7 +42,7 @@ public class TokenService : ITokenService
         // Build the token
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_configuration["Jwt:Key"]!));
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
-        var accessTokenExpireMinutes = _configuration.GetValue("Jwt:AccessTokenExpireMinutes", 30);
+        var accessTokenExpireMinutes = GetAccessTokenExpiryMinutes();
 
         var token = new JwtSecurityToken(
             issuer: _configuration["Jwt:Issuer"],
@@ -63,4 +63,10 @@ public class TokenService : ITokenService
         rng.GetBytes(randomNumber);
         return Convert.ToBase64String(randomNumber);
     }
+    
+    public int GetAccessTokenExpiryMinutes() =>
+        _configuration.GetValue("Jwt:AccessTokenExpireMinutes", 30);
+    
+    public int GetRefreshTokenExpiryMinutes() =>
+        _configuration.GetValue("Jwt:RefreshTokenExpireMinutes", 10080); // Default 7 days
 }

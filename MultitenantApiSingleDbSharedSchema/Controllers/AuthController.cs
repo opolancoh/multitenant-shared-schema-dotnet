@@ -1,4 +1,3 @@
-using System.IdentityModel.Tokens.Jwt;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using MultitenantApiSingleDbSharedSchema.Core.Features.Auth.DTOs;
@@ -10,12 +9,10 @@ namespace MultitenantApiSingleDbSharedSchema.Controllers;
 [Route("api/[controller]")]
 public class AuthController : ControllerBase
 {
-    private readonly ITokenService _tokenService;
     private readonly IAuthService _authService;
 
-    public AuthController(IAuthService authService, ITokenService tokenService)
+    public AuthController(IAuthService authService)
     {
-        _tokenService = tokenService;
         _authService = authService;
     }
 
@@ -25,7 +22,7 @@ public class AuthController : ControllerBase
         var (accessToken, refreshToken) = await _authService.LoginAsync(request.Username, request.Password);
         if (accessToken == null || refreshToken == null)
         {
-            return Unauthorized(new { message = "Invalid credentials" });
+            return Unauthorized(new { Message = "Invalid credentials." });
         }
 
         return Ok(new { accessToken, refreshToken });
@@ -37,7 +34,7 @@ public class AuthController : ControllerBase
         var (accessToken, newRefreshToken) = await _authService.RefreshTokenAsync(request.RefreshToken);
         if (accessToken == null || newRefreshToken == null)
         {
-            return Unauthorized(new { message = "Invalid or expired refresh token" });
+            return Unauthorized(new { Message = "Invalid or expired refresh token." });
         }
 
         return Ok(new { accessToken, refreshToken = newRefreshToken });
@@ -45,23 +42,25 @@ public class AuthController : ControllerBase
 
     [Authorize]
     [HttpPost("logout")]
-    public async Task<IActionResult> Logout([FromBody] RefreshRequest request)
+    public async Task<IActionResult> Logout([FromBody] LogoutRequest request)
     {
-        await _authService.LogoutAsync(request.RefreshToken);
-        return NoContent();
+        var result = await _authService.LogoutAsync(request.RefreshToken);
+
+        if (!result.Succeeded)
+            return BadRequest(new { Message = "One or more validation errors occurred.", result.Errors });
+
+        return Ok(new { Message = "Logged out successfully." });
     }
 
     [Authorize]
     [HttpPost("logout-all")]
     public async Task<IActionResult> LogoutAll()
     {
-        var userIdClaim = User.Claims.FirstOrDefault(c => c.Type == JwtRegisteredClaimNames.Sub);
-        if (userIdClaim == null) return Unauthorized();
+        var result = await _authService.LogoutAllAsync();
+        
+        if (!result.Succeeded)
+            return BadRequest(new { Message = "Logout failed. Please try again."});
 
-        if (!Guid.TryParse(userIdClaim.Value, out var userId))
-            return Unauthorized();
-
-        await _authService.LogoutAllAsync(userId);
         return NoContent();
     }
 }
